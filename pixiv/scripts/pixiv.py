@@ -1,20 +1,34 @@
+#!/usr/bin/env python3
+"""Pixiv 搜索下载工具 — Cookie 鉴权模式"""
+
 import requests
 import yaml
 import os
+import re
 import argparse
-import time
-import json
-from pathlib import Path
-
-# 解决 Windows GBK 编码问题
 import sys
+
 sys.stdout.reconfigure(encoding='utf-8')
 
-# Pixiv 官方 APP 的 OAuth 凭据（公开信息）
-PIXIV_CLIENT_ID = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
-PIXIV_CLIENT_SECRET = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
-PIXIV_AUTH_URL = "https://oauth.secure.pixiv.net/auth/token"
 CONFIG_PATH = "config.yaml"
+
+COOKIE_HELP = """
+╔══════════════════════════════════════════════════════╗
+║         PHPSESSID 已过期或无效，请更新 Cookie         ║
+╠══════════════════════════════════════════════════════╣
+║  获取步骤：                                          ║
+║  1. 浏览器打开 https://www.pixiv.net 并登录           ║
+║  2. 按 F12 → Application → Cookies → pixiv.net      ║
+║  3. 找到 PHPSESSID，复制它的值                        ║
+║                                                      ║
+║  更新命令：                                          ║
+║  python3 scripts/pixiv.py cookie --set "你的值"       ║
+╚══════════════════════════════════════════════════════╝
+"""
+
+
+def show_cookie_help():
+    print(COOKIE_HELP, file=sys.stderr)
 
 
 class PixivClient:
@@ -25,70 +39,59 @@ class PixivClient:
 
         pixiv_cfg = self.config.get("pixiv", {})
         self.cookie = pixiv_cfg.get("cookie", "")
-        self.download_dir = os.path.abspath(self.config["pixiv"]["download_dir"])
-        self.default_limit = self.config.get("search", {}).get("default_limit", 5)
-
-        # OAuth 认证
-        auth_cfg = pixiv_cfg.get("auth", {})
-        self.refresh_token = auth_cfg.get("refresh_token", "")
-        self.access_token = auth_cfg.get("access_token", "")
-        self.token_expires_at = auth_cfg.get("expires_at", 0)
+        self.download_dir = os.path.abspath(pixiv_cfg.get("download_dir", "./downloads"))
+        self.default_limit = self.config.get("search", {}).get("limit", 5)
 
         self.session = requests.Session()
 
-    def _ensure_auth(self):
-        """确保 access_token 有效，必要时自动刷新"""
-        if not self.refresh_token:
-            return False
-        if self.access_token and time.time() < self.token_expires_at - 60:
-            return True
-        # 刷新 token
-        try:
-            resp = requests.post(PIXIV_AUTH_URL, data={
-                "client_id": PIXIV_CLIENT_ID,
-                "client_secret": PIXIV_CLIENT_SECRET,
-                "grant_type": "refresh_token",
-                "refresh_token": self.refresh_token,
-                "get_secure_url": 1,
-            }, timeout=15)
-            data = resp.json()
-            if "access_token" in data:
-                self.access_token = data["access_token"]
-                self.refresh_token = data.get("refresh_token", self.refresh_token)
-                self.token_expires_at = time.time() + data.get("expires_in", 3600)
-                self._save_auth()
-                return True
-            else:
-                print(f"[OAuth] 刷新 token 失败: {data}", file=sys.stderr)
-                return False
-        except Exception as e:
-            print(f"[OAuth] 刷新 token 异常: {e}", file=sys.stderr)
-            return False
-
-    def _save_auth(self):
-        """将刷新后的 token 写回配置文件"""
-        try:
-            with open(self.config_path, "r", encoding="utf-8") as f:
-                config = yaml.safe_load(f)
-            config.setdefault("pixiv", {}).setdefault("auth", {})
-            config["pixiv"]["auth"]["access_token"] = self.access_token
-            config["pixiv"]["auth"]["refresh_token"] = self.refresh_token
-            config["pixiv"]["auth"]["expires_at"] = self.token_expires_at
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(config, f, allow_unicode=True, default_flow_style=False)
-        except Exception as e:
-            print(f"[OAuth] 保存 token 失败: {e}", file=sys.stderr)
+    def _save_cookie(self, phpsessid):
+        cookie_str = f"PHPSESSID={phpsessid};"
+        with open(self.config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f)
+        config.setdefault("pixiv", {})["cookie"] = cookie_str
+        with open(self.config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, allow_unicode=True, default_flow_style=False)
+        self.cookie = cookie_str
+        print(f"[成功] PHPSESSID 已保存到 {self.config_path}")
 
     def _headers(self):
-        headers = {
+        return {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.pixiv.net/",
+            "Cookie": self.cookie,
         }
-        if self._ensure_auth():
-            headers["Authorization"] = f"Bearer {self.access_token}"
-        elif self.cookie:
-            headers["Cookie"] = self.cookie
-        return headers
+
+    def _is_cookie_error(self, data):
+        """检测响应是否因为 Cookie 失效"""
+        if not isinstance(data, dict):
+            return False
+        if not data.get("error"):
+            return False
+        # body 为空列表 + error=true → Cookie 失效
+        if isinstance(data.get("body"), list) and len(data.get("body", [])) == 0:
+            return True
+        msg = str(data.get("message", "")).lower()
+        return any(kw in msg for kw in [
+            "auth", "login", "unauthorized", "session", "cookie",
+            "不明なエラー",  # Pixiv 的通用错误（Cookie 失效时常见）
+        ])
+
+    def _handle_cookie_error(self):
+        """Cookie 失效时显示帮助并尝试交互式更新"""
+        show_cookie_help()
+        try:
+            choice = input("是否现在输入新的 PHPSESSID？[y/N]: ").strip().lower()
+            if choice in ("y", "yes"):
+                phpsessid = input("PHPSESSID: ").strip()
+                if phpsessid:
+                    m = re.search(r"PHPSESSID=([^;]+)", phpsessid)
+                    if m:
+                        phpsessid = m.group(1)
+                    self._save_cookie(phpsessid)
+                    return True
+        except (EOFError, KeyboardInterrupt):
+            pass
+        return False
 
     def search(self, keyword, page=1, limit=None):
         fetch_limit = limit if limit is not None else self.default_limit
@@ -100,7 +103,15 @@ class PixivClient:
 
         r = self.session.get(url, params=params, headers=self._headers())
         data = r.json()
-        # 兼容新旧 API 返回格式
+
+        if self._is_cookie_error(data):
+            if self._handle_cookie_error():
+                # 重试
+                r = self.session.get(url, params=params, headers=self._headers())
+                data = r.json()
+            else:
+                return []
+
         body = data.get("body", {})
         if isinstance(body, dict):
             items = body.get("illust", {}).get("data", [])
@@ -111,20 +122,33 @@ class PixivClient:
     def get_illust_info(self, illust_id):
         url = f"https://www.pixiv.net/ajax/illust/{illust_id}"
         r = self.session.get(url, headers=self._headers())
-        return r.json()["body"]
+        data = r.json()
+
+        if self._is_cookie_error(data):
+            if self._handle_cookie_error():
+                r = self.session.get(url, headers=self._headers())
+                data = r.json()
+            else:
+                raise RuntimeError("Cookie 无效，无法获取作品信息")
+
+        return data["body"]
 
     def download(self, illust_id):
-        info = self.get_illust_info(illust_id)
+        try:
+            info = self.get_illust_info(illust_id)
+        except (KeyError, RuntimeError) as e:
+            print(f"[错误] 获取作品信息失败: {e}", file=sys.stderr)
+            show_cookie_help()
+            return []
+
         page_count = info.get("pageCount", 1)
         saved_paths = []
 
-        # 下载时使用 Referer + Cookie（图片 CDN 不走 OAuth）
         img_headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Referer": "https://www.pixiv.net/",
+            "Cookie": self.cookie,
         }
-        if self.cookie:
-            img_headers["Cookie"] = self.cookie
 
         for p in range(page_count):
             img_url = info["urls"]["original"].replace("_p0", f"_p{p}")
@@ -135,18 +159,11 @@ class PixivClient:
             save_path = os.path.join(self.download_dir, filename)
 
             try:
-                resp = requests.get(
-                    proxy_url,
-                    headers=img_headers,
-                    timeout=40
-                )
+                resp = requests.get(proxy_url, headers=img_headers, timeout=40)
                 resp.raise_for_status()
-
                 with open(save_path, "wb") as f:
                     f.write(resp.content)
-
                 saved_paths.append(save_path)
-
             except Exception as e:
                 print(f"[下载失败] {proxy_url}，错误：{str(e)}")
                 continue
@@ -158,31 +175,54 @@ def main():
     parser = argparse.ArgumentParser(description="Pixiv 搜索下载工具")
     subparsers = parser.add_subparsers(dest="cmd", required=True)
 
-    # 搜索命令
-    search_parser = subparsers.add_parser("search", help="搜索插画")
-    search_parser.add_argument("--keywords", required=True, help="搜索关键词")
-    search_parser.add_argument("--page", type=int, default=1, help="页码，默认1")
-    search_parser.add_argument("--limit", type=int, help="单次获取上限，默认读取config")
+    sp = subparsers.add_parser("search", help="搜索插画")
+    sp.add_argument("--keyword", required=True, help="搜索关键词")
+    sp.add_argument("--page", type=int, default=1, help="页码")
+    sp.add_argument("--limit", type=int, help="获取条数，默认读取 config")
 
-    # 下载命令
-    download_parser = subparsers.add_parser("download", help="下载插画（支持多页）")
-    download_parser.add_argument("--id", required=True, help="作品ID")
+    dp = subparsers.add_parser("download", help="下载插画（支持多页）")
+    dp.add_argument("--id", required=True, help="作品ID")
 
-    # 配置信息
-    info_parser = subparsers.add_parser("info", help="查看当前配置信息")
+    subparsers.add_parser("info", help="查看当前配置")
 
-    # 登录命令
-    login_parser = subparsers.add_parser("login", help="通过用户名密码登录获取 refresh_token")
-    login_parser.add_argument("--username", required=True, help="Pixiv 用户名/邮箱")
-    login_parser.add_argument("--password", required=True, help="Pixiv 密码")
+    cp = subparsers.add_parser("cookie", help="设置 PHPSESSID Cookie")
+    cp.add_argument("--set", dest="phpsessid", help="PHPSESSID 值")
 
     args = parser.parse_args()
+
+    if args.cmd == "cookie":
+        client = PixivClient()
+        if hasattr(args, "phpsessid") and args.phpsessid:
+            phpsessid = args.phpsessid.strip()
+        else:
+            print("=" * 50)
+            print("获取 PHPSESSID 步骤：")
+            print("  1. 浏览器打开 https://www.pixiv.net 并登录")
+            print("  2. F12 → Application → Cookies → pixiv.net")
+            print("  3. 复制 PHPSESSID 的值")
+            print("=" * 50)
+            phpsessid = input("\nPHPSESSID: ").strip()
+
+        if not phpsessid:
+            print("[错误] PHPSESSID 不能为空")
+            return
+
+        m = re.search(r"PHPSESSID=([^;]+)", phpsessid)
+        if m:
+            phpsessid = m.group(1)
+
+        client._save_cookie(phpsessid)
+        print("[提示] 运行 python3 scripts/pixiv.py info 验证配置")
+        return
+
     client = PixivClient()
 
     if args.cmd == "search":
-        items = client.search(args.keywords, page=args.page, limit=args.limit)
-        print(f"[搜索] {args.keywords} | 第{args.page}页\n")
-
+        items = client.search(args.keyword, page=args.page, limit=args.limit)
+        if not items:
+            print(f"[搜索] {args.keyword} | 无结果（可能 Cookie 已过期）", file=sys.stderr)
+            return
+        print(f"[搜索] {args.keyword} | 第{args.page}页\n")
         for item in items:
             print(f"[ID] {item['id']}")
             print(f"[标题] {item['title']}")
@@ -199,39 +239,20 @@ def main():
         paths = client.download(args.id)
         for p in paths:
             print(f"[完成] {p}")
+        if not paths:
+            print("[提示] 下载失败，请检查 Cookie 是否有效", file=sys.stderr)
 
     elif args.cmd == "info":
         print("=" * 50)
         print(f"[下载目录] {client.download_dir}")
-        print(f"[默认搜索限制] {client.default_limit} 条")
-        print(f"[Cookie状态] 已配置" if client.cookie else "[Cookie状态] 未配置")
-        print(f"[OAuth] refresh_token: {'已配置' if client.refresh_token else '未配置'}")
-        print(f"[OAuth] access_token: {'已配置' if client.access_token else '未配置'}")
+        print(f"[默认搜索上限] {client.default_limit} 条")
+        print(f"[Cookie] {'已配置' if client.cookie else '未配置'}")
+        if client.cookie:
+            m = re.search(r"PHPSESSID=([^;]+)", client.cookie)
+            if m:
+                print(f"  PHPSESSID: {m.group(1)[:16]}...")
         print("=" * 50)
 
-    elif args.cmd == "login":
-        print("[登录] 正在获取 refresh_token...")
-        try:
-            resp = requests.post(PIXIV_AUTH_URL, data={
-                "client_id": PIXIV_CLIENT_ID,
-                "client_secret": PIXIV_CLIENT_SECRET,
-                "grant_type": "password",
-                "username": args.username,
-                "password": args.password,
-                "get_secure_url": 1,
-            }, timeout=15)
-            data = resp.json()
-            if "access_token" in data:
-                client.access_token = data["access_token"]
-                client.refresh_token = data["refresh_token"]
-                client.token_expires_at = time.time() + data.get("expires_in", 3600)
-                client._save_auth()
-                print(f"[登录成功] access_token 已保存，有效期 {data.get('expires_in', 3600)} 秒")
-                print(f"[登录成功] refresh_token 已保存到 config.yaml")
-            else:
-                print(f"[登录失败] {data}")
-        except Exception as e:
-            print(f"[登录异常] {e}")
 
 if __name__ == "__main__":
     main()
