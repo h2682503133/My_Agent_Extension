@@ -1,0 +1,16 @@
+{
+  "llbot_path": "D:\\DuanKou\\tools\\LLBot-CLI-win-x64\\llbot.exe",
+  "qq_path": "D:\\DuanKou\\tools\\QQNT-Robot\\QQ.exe",
+  "account_count": 1,
+  "base_pmhq_port": 13001,
+  "base_webui_port": 3081,
+  "base_satori_port": 5601,
+  "satori_token": "",
+  "headless": false,
+  "target_qq": "3559594073",
+  "monitored": {
+    "851648664": [
+      "2195239690"
+    ]
+  }
+}
