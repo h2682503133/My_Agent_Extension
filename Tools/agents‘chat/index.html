@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>群聊调度台 · 多智能体</title>
+<style>
+:root{
+  --bg:#d8dbe0;
+  --phone-bg:#f6f7f9;
+  --header-bg:#ffffff;
+  --primary:#07c160;
+  --primary-dark:#06ad56;
+  --text:#1f2329;
+  --text-sub:#8a919f;
+  --bubble-left:#ffffff;
+  --bubble-right:#95ec69;
+  --border:#e5e7eb;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  color:var(--text);
+}
+.phone{
+  width:min(100vw,430px);
+  height:100dvh;
+  background:var(--phone-bg);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+  position:relative;
+}
+@media (min-width:520px){
+  .phone{
+    height:min(100dvh,900px);
+    border-radius:38px;
+    box-shadow:0 24px 80px rgba(0,0,0,.28), 0 0 0 8px #1c1e22;
+    margin:16px 0;
+  }
+}
+.top{
+  background:var(--header-bg);
+  border-bottom:1px solid var(--border);
+  padding:calc(env(safe-area-inset-top,0px) + 10px) 14px 8px;
+  flex-shrink:0;
+}
+.title-row{display:flex;align-items:center;gap:8px}
+.dot{width:9px;height:9px;border-radius:50%;background:#c4c9d2;flex-shrink:0}
+.dot.on{background:#2ecc71;box-shadow:0 0 6px rgba(46,204,113,.8)}
+.dot.off{background:#e74c3c}
+h1{font-size:16px;font-weight:600;flex:1}
+.gear{
+  border:none;background:none;font-size:19px;color:var(--text-sub);
+  width:34px;height:34px;border-radius:50%;cursor:pointer;
+}
+.gear:active{background:#f0f1f3}
+.status{
+  margin-top:7px;font-size:12.5px;color:var(--text-sub);
+  background:#f2f3f5;border-radius:8px;padding:5px 9px;
+  min-height:22px;line-height:1.4;
+}
+.agents{
+  margin-top:7px;font-size:11.5px;color:var(--text-sub);
+  text-align:center;
+}
+.settings{
+  flex-shrink:0;background:#fff;border-bottom:1px solid var(--border);
+  padding:10px 14px;display:flex;flex-direction:column;gap:8px;
+  overflow:hidden;max-height:min(72vh,640px);
+  transition:max-height .28s ease, padding .28s ease, border-width .28s ease, gap .28s ease;
+}
+.settings.collapsed{
+  max-height:0;padding-top:0;padding-bottom:0;border-bottom-width:0;gap:0;
+}
+.settings:not(.collapsed){
+  overflow-y:auto;
+}
+.settings .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.settings label{font-size:12.5px;color:var(--text-sub);white-space:nowrap}
+.btn-row{display:flex;gap:8px}
+.btn-start{
+  flex:1;border:none;border-radius:10px;background:var(--primary);color:#fff;
+  font-size:14.5px;font-weight:600;padding:10px;cursor:pointer;
+}
+.btn-start:active{background:var(--primary-dark)}
+.btn-reset{
+  border:1px solid var(--border);border-radius:10px;background:#fff;color:var(--text-sub);
+  font-size:13px;padding:10px 14px;cursor:pointer;
+}
+.chat{
+  flex:1;overflow-y:auto;padding:12px 12px 20px;
+  -webkit-overflow-scrolling:touch;
+}
+.chat::-webkit-scrollbar{display:none}
+.msg{display:flex;margin:10px 0;align-items:flex-start;gap:8px}
+.msg.right{flex-direction:row-reverse}
+.avatar{
+  width:34px;height:34px;border-radius:8px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;color:#fff;
+}
+.avatar.s-user{background:#7f8c8d}
+.avatar.s-lilith{background:#c0392b}
+.avatar.s-alice{background:#5b8def}
+.avatar.s-luna{background:#8e44ad}
+.avatar.s-main{background:#16a085}
+.avatar.s-talker{background:#e67e22}
+.avatar.s-default{background:#95a5a6}
+.body{max-width:75%;display:flex;flex-direction:column;gap:3px}
+.msg.right .body{align-items:flex-end}
+.meta{font-size:10.5px;color:var(--text-sub);padding:0 2px}
+.bubble{
+  padding:9px 11px;border-radius:12px;font-size:14.5px;line-height:1.55;
+  white-space:pre-wrap;word-break:break-word;
+  background:var(--bubble-left);box-shadow:0 1px 2px rgba(0,0,0,.04);
+}
+.msg.right .bubble{background:var(--bubble-right);border-bottom-right-radius:3px}
+.msg.left .bubble{border-bottom-left-radius:3px}
+.bubble:active{opacity:.85}
+.pill{
+  text-align:center;font-size:11.5px;color:#7b8494;margin:14px auto;
+  background:#eef0f3;border-radius:999px;padding:4px 12px;
+  max-width:88%;word-break:break-word;line-height:1.5;
+}
+.bottom{
+  flex-shrink:0;background:var(--header-bg);border-top:1px solid var(--border);
+  padding:8px 10px calc(env(safe-area-inset-bottom,0px) + 8px);
+}
+.hint{
+  font-size:11px;color:var(--text-sub);text-align:center;margin-bottom:7px;
+  line-height:1.4;cursor:pointer;user-select:none;
+}
+.hint .chev{
+  display:inline-block;margin-left:5px;font-size:9px;
+  transition:transform .2s ease;
+}
+.hint.collapsed .chev{transform:rotate(180deg)}
+.hint.collapsed #hintText{display:none}
+.input-row{display:flex;gap:8px;align-items:center}
+.input-row input{
+  flex:1;border:1px solid var(--border);border-radius:999px;
+  padding:10px 14px;font-size:14.5px;background:#fff;min-width:0;
+}
+.input-row input:focus{outline:none;border-color:var(--primary)}
+.send-btn{
+  border:none;border-radius:999px;background:var(--primary);color:#fff;
+  font-size:14px;font-weight:600;padding:10px 18px;cursor:pointer;
+  white-space:nowrap;
+}
+.send-btn:active{background:var(--primary-dark)}
+.send-btn:disabled{background:#c4c9d2}
+#toast{
+  position:absolute;top:70px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.78);color:#fff;font-size:12.5px;
+  padding:8px 14px;border-radius:10px;max-width:80%;
+  opacity:0;pointer-events:none;transition:opacity .25s;z-index:99;
+  text-align:center;
+}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="phone">
+  <header class="top">
+    <div class="title-row">
+      <span class="dot" id="dot"></span>
+      <h1>群聊调度台</h1>
+      <button class="gear" id="btnGear" title="设置">⚙️</button>
+    </div>
+    <div class="status" id="statusBar">未连接服务…</div>
+    <div class="agents" id="agentsBar" hidden></div>
+  </header>
+
+  <div class="settings collapsed" id="settingsPanel">
+    <div class="row" style="align-items:flex-start"><label style="margin-top:6px">成员特征</label><textarea id="profilesInput" placeholder="lilith: 魅魔姐姐&#10;alice: 精灵修女妹妹&#10;luna: 月之魔女" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:12px;min-width:0;min-height:72px;resize:vertical;font-family:inherit;background:#fff;color:var(--text)"></textarea></div>
+    <div class="row" style="font-size:11px;color:var(--text-sub)">💡 特征每行「成员名: 描述」，调度 LLM 靠它把话题关联到成员；下方可随时入场/离场</div>
+    <div class="row" style="border-top:1px solid var(--border);padding-top:8px">
+      <label>成员管理</label>
+      <div id="memberChips" style="flex:1;display:flex;flex-wrap:wrap;gap:6px;min-height:28px;align-items:center"></div>
+    </div>
+    <div class="row" style="border-top:1px solid var(--border);padding-top:8px">
+      <label>剧本</label>
+      <input id="sessionInput" placeholder="留空=默认剧本（grp_agents_chat）" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13.5px;min-width:0">
+      <span style="font-size:11px;color:var(--text-sub);white-space:nowrap">session=grp_agents_chat_&lt;后缀&gt;</span>
+    </div>
+    <div class="row">
+      <input id="memberAddInput" placeholder="新成员名" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13.5px;min-width:0">
+      <button class="btn-reset" id="btnMemberAdd" style="padding:8px 12px">入场</button>
+    </div>
+    <div class="row" style="border-top:1px solid var(--border);padding-top:8px">
+      <label>编造事件</label>
+      <select id="fabricateSelect" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13.5px;min-width:0;background:#fff;color:var(--text)">
+        <option value="">-- 选择离场成员 --</option>
+      </select>
+      <button class="btn-reset" id="btnFabricate" style="padding:8px 12px">编造</button>
+    </div>
+    <div class="row" style="align-items:flex-start">
+      <label style="margin-top:6px">在场角色</label>
+      <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+        <div id="presentChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:26px;align-items:center"></div>
+        <div style="display:flex;gap:6px;">
+          <input id="presentInput" placeholder="选/输入事件发生时在场的角色（不选=仅自己）" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12.5px;min-width:0">
+          <button class="btn-reset" id="btnPresentAdd" style="padding:6px 10px;font-size:12.5px">添加</button>
+        </div>
+      </div>
+    </div>
+    <div class="row" style="font-size:11px;color:var(--text-sub)">💡 编造只生成草稿（再次编造会覆盖旧草稿），该角色重新入场时自动发送插入对话（session 隔离）</div>
+    <div class="row" style="align-items:flex-start;border-top:1px solid var(--border);padding-top:8px">
+      <label style="margin-top:6px">编造记录</label>
+      <div id="fabricateLog" style="flex:1;display:flex;flex-direction:column;gap:5px;min-width:0;max-height:150px;overflow-y:auto"></div>
+    </div>
+    <div class="row" style="border-top:1px solid var(--border);padding-top:8px">
+      <label>用户 id</label>
+      <input id="userUidInput" placeholder="user（与 &lt;agent_id&gt; 同款前缀）" autocomplete="off" style="flex:1;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13.5px;min-width:0">
+      <label style="white-space:nowrap"><input type="checkbox" id="userInjectChk" checked style="vertical-align:middle"> 注入 &lt;id&gt;:</label>
+      <button class="btn-reset" id="btnUserIdentity" style="padding:8px 12px">设置</button>
+    </div>
+    <div class="btn-row">
+      <button class="btn-start" id="btnStart">开始群聊</button>
+      <button class="btn-reset" id="btnReset">重置</button>
+    </div>
+  </div>
+
+  <main class="chat" id="chat"></main>
+
+  <footer class="bottom">
+    <div class="hint" id="hint" title="点击展开/收起提示"><span id="hintText">输入内容=用户插话（自动路由） · 空输入发送=自动路由下一位成员</span><span class="chev">▴</span></div>
+    <div class="input-row">
+      <input id="input" placeholder="输入消息…" autocomplete="off">
+      <button class="send-btn" id="btnSend" disabled>发送</button>
+    </div>
+  </footer>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const dot=$("dot"),statusBar=$("statusBar"),chat=$("chat"),input=$("input"),
+      btnSend=$("btnSend"),btnGear=$("btnGear"),settingsPanel=$("settingsPanel"),
+      btnStart=$("btnStart"),btnReset=$("btnReset"),
+      profilesInput=$("profilesInput"),
+      agentsBar=$("agentsBar"),hint=$("hint"),toastEl=$("toast"),
+      memberChips=$("memberChips"),memberAddInput=$("memberAddInput"),btnMemberAdd=$("btnMemberAdd"),
+      fabricateSelect=$("fabricateSelect"),btnFabricate=$("btnFabricate"),
+      presentChips=$("presentChips"),presentInput=$("presentInput"),btnPresentAdd=$("btnPresentAdd"),
+      fabricateLogEl=$("fabricateLog"),
+      userUidInput=$("userUidInput"),userInjectChk=$("userInjectChk"),btnUserIdentity=$("btnUserIdentity"),
+      sessionInput=$("sessionInput");
+
+let mode="idle";       // idle | first | waiting | pending
+let stickBottom=true;
+let currentMembers=[];
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function toast(msg){
+  toastEl.textContent=msg;
+  toastEl.classList.add("show");
+  clearTimeout(toastEl._t);
+  toastEl._t=setTimeout(()=>toastEl.classList.remove("show"),2200);
+}
+function setStatus(text,m){
+  statusBar.textContent=text||"";
+  if(m)mode=m;
+  updateSend();
+}
+function updateSend(){
+  if(mode==="first"){btnSend.textContent="发起";btnSend.disabled=false;}
+  else if(mode==="pending"){
+    btnSend.textContent=input.value.trim()?"插话":"自动路由";
+    btnSend.disabled=false;
+  }else if(mode==="waiting"){
+    const has=!!input.value.trim();
+    btnSend.textContent=has?"插话":"发送";
+    btnSend.disabled=!has;
+  }else{
+    btnSend.textContent="发送";
+    btnSend.disabled=true;
+  }
+}
+function nearBottom(){return chat.scrollHeight-chat.scrollTop-chat.clientHeight<140;}
+function scrollBottom(){if(stickBottom)chat.scrollTop=chat.scrollHeight;}
+chat.addEventListener("scroll",()=>{stickBottom=nearBottom();});
+
+function avatarClass(s){
+  const name=String(s||"").toLowerCase();
+  return "avatar s-"+name.replace(/[^a-z0-9]/g,"")+" avatar s-default";
+}
+function addMsg(ev){
+  const speaker=(ev.speaker||"").trim();
+  const uid=(userUidInput.value||"user").trim();
+  const isUser=(speaker===uid)||(speaker==="user"&&!uid);
+  // left 变量语义 = "是用户消息"（用户消息显示在右侧）
+  const left=isUser;
+  const wrap=document.createElement("div");
+  wrap.className="msg "+(left?"right":"left");
+  const avatar=(isUser?"我":speaker.slice(0,1).toUpperCase());
+  wrap.innerHTML=
+    '<div class="'+avatarClass(speaker)+'">'+esc(avatar)+'</div>'+
+    '<div class="body"><div class="meta">'+esc(speaker||"?")+'</div>'+
+    '<div class="bubble">'+esc(ev.text)+'</div></div>';
+  wrap.querySelector(".bubble").addEventListener("click",()=>{
+    input.value=ev.text;
+    input.focus();
+    updateSend();
+  });
+  chat.appendChild(wrap);
+  scrollBottom();
+}
+function addPill(text){
+  const p=document.createElement("div");
+  p.className="pill";
+  p.textContent=text;
+  chat.appendChild(p);
+  scrollBottom();
+}
+function addSystem(text){addPill("— "+text+" —");}
+
+// ---- 成员管理（入场/离场）----
+function renderMemberChips(){
+  memberChips.innerHTML="";
+  if(!currentMembers.length){
+    memberChips.innerHTML='<span style="font-size:11.5px;color:var(--text-sub)">无成员</span>';
+    return;
+  }
+  currentMembers.forEach(m=>{
+    const chip=document.createElement("span");
+    chip.style.cssText="display:inline-flex;align-items:center;gap:4px;background:#f2f3f5;border:1px solid var(--border);border-radius:999px;padding:4px 9px;font-size:12px;";
+    const label=document.createElement("span");
+    label.textContent=m;
+    const del=document.createElement("button");
+    del.textContent="✕";
+    del.style.cssText="border:none;background:none;color:var(--text-sub);font-size:11px;cursor:pointer;padding:0 2px;";
+    del.title="离场";
+    del.onclick=()=>apiRemoveMember(m);
+    chip.appendChild(label);
+    chip.appendChild(del);
+    memberChips.appendChild(chip);
+  });
+}
+function updateMembersUI(members){
+  currentMembers=members||[];
+  renderMemberChips();
+  agentsBar.textContent="群聊成员："+currentMembers.join("、");
+  updateKnownRoles();
+}
+let currentLeftMembers=[];
+function updateLeftMembersUI(left){
+  currentLeftMembers=left||[];
+  fabricateSelect.innerHTML='<option value="">-- 选择离场成员 --</option>'+
+    currentLeftMembers.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  updateKnownRoles();
+}
+// 在场角色（事件发生时在场的角色）：多选 + 自由输入
+let currentPresent=[];
+let knownRoles=[];  // 群聊已知角色（在场+离场）
+function updateKnownRoles(){
+  knownRoles=[...new Set([...(currentMembers||[]),...(currentLeftMembers||[])])];
+  renderPresentChips();
+}
+function renderPresentChips(){
+  presentChips.innerHTML="";
+  // 候选：已知角色（点选切换）+ 已自由输入的角色（可移除）
+  const candidates=[...new Set([...knownRoles,...currentPresent])];
+  candidates.forEach(r=>{
+    const on=currentPresent.includes(r);
+    const chip=document.createElement("span");
+    chip.style.cssText="display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:4px 9px;font-size:12px;cursor:pointer;"+
+      (on?"background:#07c160;color:#fff;border:1px solid #07c160;":"background:#f2f3f5;color:var(--text);border:1px solid var(--border);");
+    chip.textContent=r+(on?" ✓":"");
+    chip.onclick=()=>{
+      if(currentPresent.includes(r))currentPresent=currentPresent.filter(x=>x!==r);
+      else currentPresent.push(r);
+      renderPresentChips();
+    };
+    presentChips.appendChild(chip);
+  });
+  if(!candidates.length){
+    presentChips.innerHTML='<span style="font-size:11.5px;color:var(--text-sub)">（不选=仅目标角色自己在场）</span>';
+  }
+}
+function presentAddFree(){
+  const v=presentInput.value.trim();
+  if(!v)return;
+  v.split(/[,，、\s]+/).filter(Boolean).forEach(r=>{
+    if(!currentPresent.includes(r))currentPresent.push(r);
+  });
+  presentInput.value="";
+  renderPresentChips();
+}
+btnPresentAdd.addEventListener("click",presentAddFree);
+presentInput.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();presentAddFree();}});
+// ---- 编造记录（草稿，该角色重新入场时自动发送）----
+let fabricateDrafts={};  // agent -> {text, time, sent}
+function renderFabricateLog(){
+  fabricateLogEl.innerHTML="";
+  const agents=Object.keys(fabricateDrafts);
+  if(!agents.length){
+    fabricateLogEl.innerHTML='<span style="font-size:11.5px;color:var(--text-sub)">暂无编造草稿</span>';
+    return;
+  }
+  agents.forEach(a=>{
+    const d=fabricateDrafts[a];
+    const box=document.createElement("div");
+    box.style.cssText="border:1px solid var(--border);border-radius:8px;padding:6px 8px;font-size:11.5px;";
+    const head=document.createElement("div");
+    head.style.cssText="display:flex;align-items:center;gap:6px;color:var(--text-sub);margin-bottom:3px;";
+    const name=document.createElement("span");
+    name.textContent="👤 "+a+" · "+(d.time||"");
+    head.appendChild(name);
+    const st=document.createElement("span");
+    st.style.cssText="margin-left:auto;font-size:10.5px;"+(d.sent?"color:var(--text-sub);":"color:#e6a23c;font-weight:bold;");
+    st.textContent=d.sent?"已发送（入场时）":"待发送";
+    head.appendChild(st);
+    const body=document.createElement("div");
+    body.style.cssText="white-space:pre-wrap;word-break:break-word;line-height:1.45;";
+    body.textContent=d.text;
+    box.appendChild(head);
+    box.appendChild(body);
+    fabricateLogEl.appendChild(box);
+  });
+}
+function appendFabricated(ev){
+  fabricateDrafts[ev.agent]={text:ev.text||"",time:ev.time||"",sent:false};
+  renderFabricateLog();
+}
+function markFabricateSent(ev){
+  if(fabricateDrafts[ev.agent]){
+    fabricateDrafts[ev.agent].sent=true;
+    renderFabricateLog();
+  }
+}
+async function apiFabricate(){
+  const name=fabricateSelect.value;
+  if(!name){toast("请先选择离场成员",false);return;}
+  try{
+    const r=await fetch("/api/fabricate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,present:currentPresent})}).then(r=>r.json());
+    if(!r.ok){toast(r.error||"编造失败",false);return;}
+    toast("编造中，草稿将显示在「编造记录」...");
+  }catch(err){toast("请求失败："+err.message,false);}
+}
+btnFabricate.addEventListener("click",apiFabricate);
+async function refreshLeftMembers(){
+  try{
+    const d=await fetch("/api/history").then(r=>r.json());
+    updateLeftMembersUI(d.left_members||[]);
+  }catch(e){}
+}
+async function apiAddMember(){
+  const name=memberAddInput.value.trim();
+  if(!name){toast("请输入成员名",false);return;}
+  try{
+    const r=await fetch("/api/member/add",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})}).then(r=>r.json());
+    if(!r.ok){toast(r.error||"入场失败",false);return;}
+    updateMembersUI(r.members);
+    refreshLeftMembers();
+    memberAddInput.value="";
+    toast("已入场："+name);
+  }catch(err){toast("请求失败："+err.message,false);}
+}
+async function apiRemoveMember(name){
+  if(!confirm("让 "+name+" 离场？"))return;
+  try{
+    const r=await fetch("/api/member/remove",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name})}).then(r=>r.json());
+    if(!r.ok){toast(r.error||"离场失败",false);return;}
+    updateMembersUI(r.members);
+    refreshLeftMembers();
+    toast("已离场："+name);
+  }catch(err){toast("请求失败："+err.message,false);}
+}
+// ---- 用户身份 ----
+async function apiSetUserIdentity(){
+  const uid=userUidInput.value.trim();
+  const inject=userInjectChk.checked;
+  try{
+    const r=await fetch("/api/user_identity",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({uid,inject})}).then(r=>r.json());
+    if(!r.ok){toast("设置失败："+(r.error||""),false);return;}
+    toast("用户身份已更新");
+  }catch(err){toast("请求失败："+err.message,false);}
+}
+btnMemberAdd.addEventListener("click",apiAddMember);
+memberAddInput.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();apiAddMember();}});
+btnUserIdentity.addEventListener("click",apiSetUserIdentity);
+userUidInput.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();apiSetUserIdentity();}});
+
+// ---- SSE ----
+const es=new EventSource("/api/events");
+es.onopen=()=>{dot.className="dot on";if(!statusBar.textContent||statusBar.textContent==="未连接服务…")setStatus("已连接，点击 ⚙️ 开始群聊");};
+es.onerror=()=>{dot.className="dot off";};
+es.onmessage=e=>{
+  let ev;try{ev=JSON.parse(e.data);}catch(err){return;}
+  if(ev.type==="msg")addMsg(ev);
+  else if(ev.type==="system")addSystem(ev.text);
+  else if(ev.type==="status")setStatus(ev.text,ev.mode);
+  else if(ev.type==="fabricated")appendFabricated(ev);
+  else if(ev.type==="fabricate_sent")markFabricateSent(ev);
+};
+
+// ---- 历史记录（speaker: text 格式解析）----
+fetch("/api/history").then(r=>r.json()).then(d=>{
+  const h=d.history||[];
+  if(d.members&&d.members.length){
+    updateMembersUI(d.members);
+  }
+  if(d.left_members){
+    updateLeftMembersUI(d.left_members);
+  }
+  if(d.profiles){
+    const lines=Object.entries(d.profiles).map(([k,v])=>k+": "+v).join("\n");
+    if(!profilesInput.value)profilesInput.value=lines;
+  }
+  if(d.user_speaker!==undefined){
+    userUidInput.value=d.user_speaker||"";
+    userInjectChk.checked=!!d.user_inject;
+  }
+  if(d.fabricate_drafts){
+    fabricateDrafts=d.fabricate_drafts||{};
+    renderFabricateLog();
+  }
+  if(d.session_suffix!==undefined){
+    sessionInput.value=d.session_suffix||"";
+  }
+  if(h.length){
+    addPill("历史记录 "+h.length+" 条");
+    h.forEach(t=>{
+      const idx=t.indexOf(":");
+      if(idx>0){addMsg({speaker:t.slice(0,idx).trim(),text:t.slice(idx+1).trim()});}
+      else{addPill(t);}
+    });
+    addPill("— 以上为历史 —");
+  }
+}).catch(()=>{});
+
+// ---- 设置 / 提示 ----
+btnGear.addEventListener("click",()=>{settingsPanel.classList.toggle("collapsed");});
+hint.addEventListener("click",()=>{hint.classList.toggle("collapsed");});
+btnStart.addEventListener("click",async()=>{
+  btnStart.disabled=true;
+  try{
+    // 设置完成后开始：携带成员特征 + 用户身份（uid/inject）+ 剧本后缀，后端启动时应用
+    const profiles=profilesInput.value.trim();
+    const uid=userUidInput.value.trim();
+    const inject=userInjectChk.checked;
+    const session_suffix=sessionInput.value.trim();
+    const res=await fetch("/api/start",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({profiles,uid,inject,session_suffix})}).then(r=>r.json());
+    if(!res.ok){toast("启动失败："+(res.error||""));return;}
+    agentsBar.hidden=false;
+    agentsBar.textContent="群聊成员："+(res.members||currentMembers||[]).join("、")+(res.session_id?" · "+res.session_id:"");
+    profilesInput.disabled=true;
+    userUidInput.disabled=true;
+    userInjectChk.disabled=true;
+    // 入场/离场保持随时可用（离场→编造→再入场流程需要）；仅锁定启动前一次性配置
+    sessionInput.disabled=true;
+    settingsPanel.classList.add("collapsed");
+    toast("已开始群聊");
+  }catch(err){
+    toast("请求失败："+err.message);
+  }finally{
+    btnStart.disabled=false;
+  }
+});
+btnReset.addEventListener("click",async()=>{
+  await fetch("/api/reset",{method:"POST"});
+  agentsBar.hidden=true;
+  profilesInput.disabled=false;
+  userUidInput.disabled=false;
+  userInjectChk.disabled=false;
+  btnMemberAdd.disabled=false;
+  sessionInput.disabled=false;
+});
+
+// ---- 输入 ----
+input.addEventListener("input",updateSend);
+input.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();send();}});
+btnSend.addEventListener("click",send);
+async function send(){
+  if(btnSend.disabled)return;
+  const content=input.value;
+  btnSend.disabled=true;
+  try{
+    const res=await fetch("/api/confirm",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({content})
+    }).then(r=>r.json());
+    if(!res.ok){toast(res.error||"发送失败");input.value=content;input.focus();return;}
+    input.value="";
+    input.focus();
+  }catch(err){
+    toast("请求失败："+err.message);
+  }finally{
+    updateSend();
+  }
+}
+
+// 初始状态提示
+addPill("欢迎使用群聊调度台 · 多智能体");
+addPill("输入消息=用户插话（调度器自动选成员回应）· 空输入=自动路由下一位");
+addPill("请先启动 gateway 网关(127.0.0.1:8080)，再点击右上角 ⚙️ 开始");
+</script>
+</body>
+</html>

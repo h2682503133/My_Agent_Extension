@@ -1,0 +1,17 @@
+{
+  "members": [
+    "lilith",
+    "alice",
+    "luna",
+    "lamia",
+    "lilura"
+  ],
+  "profiles": {
+    "lilith": "魅魔，lilith姐姐，热情主动",
+    "alice": "精灵修道院的修女，傲娇妹妹",
+    "luna": "月之魔女，卖性玩具，内向",
+    "lamia": "吸血鬼，平时开后宫，毒舌，玩法变态",
+    "lilura": "龙人，旅行者，魔剑士，高挑、强壮，火辣幽默，更倾向于肉体"
+  },
+  "left_members": []
+}
