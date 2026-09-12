@@ -69,6 +69,88 @@ class LLBotMonitorAdapter(ToolAdapter):
         )
         return payload
 
+    # ── 二维码 WebUI API（优先）：按实例端口取码，自带过期时间 ──
+    def qrcode_api(self):
+        """返回 llbot WebUI 的二维码 API 源。
+
+        配置来源（优先工具自身 config.json，其次 Hub 里的工具配置）：
+          webui_url / webui_port —— WebUI 地址（默认取 base_webui_port）
+          webui_token            —— WebUI 的 x-webui-token（浏览器 cookie webui_token 的值）
+        """
+        url = str(self.cfg.get("qrcode_api_url") or "").strip()
+        token = str(self.cfg.get("qrcode_api_token") or "").strip()
+        port = self.cfg.get("qrcode_api_port")
+
+        cfg_path = self.dir_path() / "config.json"
+        if cfg_path.exists():
+            try:
+                data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                if not url:
+                    u = str(data.get("webui_url") or "").strip()
+                    p = data.get("webui_port") or data.get("base_webui_port")
+                    if u:
+                        url = u
+                    elif p:
+                        port = p
+                if not token:
+                    token = str(data.get("webui_token") or "").strip()
+            except Exception:
+                pass
+
+        if not url and port:
+            try:
+                url = f"http://127.0.0.1:{int(port)}"
+            except (TypeError, ValueError):
+                url = ""
+        if not url:
+            return None
+        return {"url": url.rstrip("/"), "token": token}
+
+    # ── 二维码：定位 llbot 的登录二维码文件（API 不可用时的兜底）──
+    def qrcode_path(self):
+        """返回 llbot 登录二维码文件（多个候选里取最新修改的那个）。
+
+        候选位置：
+          1) 工具目录本身：qrcode.png / bin/llbot/qrcode.png
+          2) 由工具 config.json 的 llbot_path 推导：
+             <llbot 所在目录>/qrcode.png
+             <llbot 所在目录>/bin/llbot/qrcode.png
+             <llbot 所在目录>/data/qrcode.png
+          3) 工具 config.json 里可直接指定 qrcode_path
+        """
+        cands = []
+        d = self.dir_path()
+        cands += [d / "qrcode.png", d / "bin" / "llbot" / "qrcode.png"]
+
+        cfg_path = d / "config.json"
+        if cfg_path.exists():
+            try:
+                data = json.loads(cfg_path.read_text(encoding="utf-8"))
+                llbot = str(data.get("llbot_path") or "").strip()
+                if llbot:
+                    base = Path(llbot).parent
+                    cands += [
+                        base / "qrcode.png",
+                        base / "bin" / "llbot" / "qrcode.png",
+                        base / "data" / "qrcode.png",
+                        base / "bin" / "llbot" / "data" / "qrcode.png",
+                    ]
+                qr = str(data.get("qrcode_path") or "").strip()
+                if qr:
+                    cands.append(Path(qr))
+            except Exception:
+                pass
+
+        best = None
+        for p in cands:
+            try:
+                if p.is_file():
+                    if best is None or p.stat().st_mtime > best.stat().st_mtime:
+                        best = p
+            except Exception:
+                continue
+        return best
+
     # ── 一键对接：把工具 config.json 切到走 Hub 代理 ──
     def bridge_apply(self, hub_base: str) -> dict:
         cfg_path = self.dir_path() / "config.json"

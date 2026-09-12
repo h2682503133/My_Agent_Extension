@@ -12,7 +12,7 @@
   },
   "tools": {
     "llbot_monitor": {
-      "auto_send": false,
+      "auto_send": true,
       "dir": "E:\\github\\My_Agent_Extension\\Tools\\LLBot群聊监控",
       "entry": "start.bat",
       "env_name": "agent",
@@ -23,7 +23,9 @@
       "msa_agent_id": "",
       "intercept": true,
       "enabled": true,
-      "auto_prefix": ""
+      "auto_prefix": "目前用户不在，请给下列日程自动设置个提醒，要求在一天前和一小时前",
+      "qrcode_api_url": "",
+      "qrcode_api_token": ""
     }
   }
 }

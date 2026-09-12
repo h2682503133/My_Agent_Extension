@@ -119,6 +119,7 @@ function renderOverview(c) {
 function renderToolPage(c, id) {
   const t = toolById(id);
   if (!t) { c.innerHTML = '<div class="card">工具不存在</div>'; return; }
+  stopQrWatch();
   $('#title').textContent = t.name;
   const tab = VIEW.tab || (t.has_page ? 'ui' : 'config');
 
@@ -130,9 +131,134 @@ function renderToolPage(c, id) {
     <div id="toolbody" style="flex:1;min-height:0;display:flex;flex-direction:column"></div>`;
 
   if (tab === 'ui') { c.className = 'flush'; return mountToolUi(t); }
-  if (tab === 'config') { $('#toolbody').innerHTML = toolConfigHtml(t); return; }
+  if (tab === 'config') {
+    $('#toolbody').innerHTML = toolConfigHtml(t);
+    if (t.has_qrcode) startQrWatch(t.id);
+    return;
+  }
   $('#toolbody').innerHTML = toolLogHtml(t);
   refreshLog(id);
+}
+
+/* ── 二维码（扫码登录）：显示二维码 + 更新时间，文件变化自动刷新 ── */
+let QR_TIMER = null, QR_TS = 0, QR_TOOL = '';
+
+function qrCardHtml(t) {
+  const cfg = t.config || {};
+  return `<div class="card"><h2>扫码登录</h2>
+    <div class="qrbox">
+      <img id="qrimg" src="/api/tools/${t.id}/qrcode" alt="登录二维码">
+      <div class="qrmeta">
+        <div class="kv"><span class="k">取源</span><span id="qrsource">—</span></div>
+        <div class="kv"><span class="k">更新时间</span><b id="qrtime">读取中…</b></div>
+        <div class="kv"><span class="k">状态</span><span id="qrage">—</span></div>
+        <div class="kv"><span class="k">文件</span><span id="qrpath" class="muted" style="font-size:11px;word-break:break-all">—</span></div>
+        <div class="row" style="margin-top:10px">
+          <button class="sm" onclick="qrReload()">立即刷新</button>
+          <span class="muted" style="font-size:12px">每 5 秒自动检测更新</span>
+        </div>
+      </div>
+    </div>
+    <details style="margin-top:12px">
+      <summary class="muted" style="cursor:pointer;font-size:12px">WebUI API 取码设置（多实例防覆盖，需 token）</summary>
+      <div class="grid" style="margin-top:8px">
+        <div><label class="f">WebUI 地址</label>
+          <input type="text" id="qr_url" value="${esc(cfg.qrcode_api_url || '')}" placeholder="http://127.0.0.1:3081"></div>
+        <div><label class="f">WebUI token（cookie webui_token）</label>
+          <input type="text" id="qr_token" value="${esc(cfg.qrcode_api_token || '')}" placeholder="留空则只用文件"></div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="sm primary" onclick="qrSaveApi('${t.id}')">保存</button>
+        <span class="muted" style="font-size:12px">API 可用时优先用 API（自带精确过期时间）；不可用自动回落二维码文件</span>
+      </div>
+    </details>
+  </div>`;
+}
+
+async function qrSaveApi(toolId) {
+  const patch = {
+    qrcode_api_url: ($('#qr_url')?.value || '').trim(),
+    qrcode_api_token: ($('#qr_token')?.value || '').trim(),
+  };
+  try {
+    await api(`/api/tools/${toolId}/config`, { method: 'POST', body: JSON.stringify(patch) });
+    toast('已保存二维码取源设置', 'ok');
+    QR_TS = 0;
+    qrTick();
+  } catch (e) { toast('保存失败：' + e.message, 'err'); }
+}
+
+function qrReload() {
+  const img = $('#qrimg');
+  if (img) img.src = `/api/tools/${QR_TOOL}/qrcode?t=${Date.now()}`;
+  qrTick();
+}
+
+async function qrTick() {
+  if (!QR_TOOL) return;
+  let d;
+  try { d = await api(`/api/tools/${QR_TOOL}/qrcode/info`); } catch (e) { return; }
+  const img = $('#qrimg'), timeEl = $('#qrtime'), ageEl = $('#qrage'),
+        pathEl = $('#qrpath'), srcEl = $('#qrsource');
+  const srcLabel = { api: 'WebUI API', file: '二维码文件（兜底）', none: '无' }[d.source] || d.source;
+
+  if (d.source === 'none') {
+    if (srcEl) srcEl.textContent = '无可用来源';
+    if (timeEl) timeEl.textContent = '—';
+    if (ageEl) ageEl.textContent = (d.api && d.api.error) || '未配置 WebUI API，且未找到二维码文件';
+    if (img) img.style.display = 'none';
+    if (pathEl) pathEl.textContent = '—';
+    return;
+  }
+  if (img) img.style.display = '';
+
+  if (d.source === 'api') {
+    const apiInfo = d.api || {};
+    if (srcEl) srcEl.textContent = 'WebUI API · ' + (apiInfo.url || '');
+    if (timeEl) timeEl.textContent = apiInfo.fetched_str || '—';
+    const left = apiInfo.expire_in;
+    if (ageEl) {
+      if (left === null || left === undefined) { ageEl.textContent = '有效'; ageEl.style.color = 'var(--ok)'; }
+      else if (left > 0) {
+        const m = Math.floor(left / 60), s = left % 60;
+        ageEl.textContent = `有效 · 剩余 ${m > 0 ? m + ' 分 ' : ''}${s} 秒`;
+        ageEl.style.color = left > 30 ? 'var(--ok)' : 'var(--warn)';
+      } else { ageEl.textContent = '已过期，正在获取新码…'; ageEl.style.color = 'var(--warn)'; }
+    }
+    const f = d.file || {};
+    if (pathEl) pathEl.textContent = f.exists ? `${f.path}（${(f.size / 1024).toFixed(1)} KB）` : '—';
+    if (img && Date.now() - QR_TS > 4000) { QR_TS = Date.now(); img.src = `/api/tools/${QR_TOOL}/qrcode?t=${QR_TS}`; }
+    return;
+  }
+
+  // 文件来源
+  const f = d.file || {};
+  if (srcEl) srcEl.textContent = '二维码文件（兜底）' + ((d.api && d.api.error) ? ` · API 不可用：${d.api.error}` : '');
+  if (timeEl) timeEl.textContent = f.updated_str || '—';
+  if (ageEl) {
+    const s = f.age_sec || 0;
+    const human = s < 60 ? `${s} 秒前` : (s < 3600 ? `${Math.floor(s / 60)} 分钟前` : `${Math.floor(s / 3600)} 小时前`);
+    ageEl.textContent = (s < 120 ? '有效 · ' : '可能已过期 · ') + human;
+    ageEl.style.color = s < 120 ? 'var(--ok)' : 'var(--warn)';
+  }
+  if (pathEl) pathEl.textContent = `${f.path}（${(f.size / 1024).toFixed(1)} KB）`;
+  if (f.updated_at !== QR_TS) {
+    QR_TS = f.updated_at;
+    if (img) img.src = `/api/tools/${QR_TOOL}/qrcode?t=${Math.floor(f.updated_at)}`;
+  }
+}
+
+function startQrWatch(toolId) {
+  stopQrWatch();
+  QR_TOOL = toolId;
+  QR_TS = 0;
+  qrTick();
+  QR_TIMER = setInterval(qrTick, 5000);
+}
+
+function stopQrWatch() {
+  if (QR_TIMER) { clearInterval(QR_TIMER); QR_TIMER = null; }
+  QR_TOOL = '';
 }
 
 /* ── 工具专属页面加载（pages/<id>.js）── */
@@ -187,6 +313,8 @@ function toolConfigHtml(t) {
         ? `<div class="card" style="margin:12px 0 0"><h2 style="color:var(--warn)">环境诊断</h2>
              <ul style="margin:0;padding-left:20px">${probe.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : ''}
     </div>`;
+
+  if (t.has_qrcode) html += qrCardHtml(t);
 
   if (t.bridge_mode === 'proxy') {
     html += `<div class="card"><h2>MSA 对接</h2>

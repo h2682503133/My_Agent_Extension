@@ -115,6 +115,12 @@ iframe.tool{width:100%;flex:1;min-height:420px;border:1px solid var(--line);bord
           backdrop-filter:blur(8px)}
 .carrybar textarea{min-height:60px;margin-top:6px;font-family:Consolas,monospace;font-size:12.5px}
 .carrybar code{background:rgba(255,255,255,.85);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11.5px}
+/* 扫码登录二维码 */
+.qrbox{display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.qrbox img{width:190px;height:190px;object-fit:contain;background:#fff;border:1px solid var(--line);
+           border-radius:10px;padding:8px;image-rendering:pixelated}
+.qrmeta{flex:1;min-width:220px}
+.qrmeta .kv .k{min-width:78px}
 /* 注意：pre-wrap 只作用于正文，避免模板缩进被当成内容渲染出大片空白 */
 /* 气泡不用 backdrop-filter（记录多时逐条模糊很吃性能），靠半透明底色即可 */
 .bubble{max-width:min(78%,720px);border-radius:12px;padding:8px 12px;box-shadow:var(--shadow);

@@ -12,6 +12,7 @@
 用法：python hub_server.py   （或双击 start.bat）
 """
 
+import base64
 import json
 import os
 import queue
@@ -308,6 +309,7 @@ class Hub:
             "command": self.build_command(ad) if ad else [],
             "auto_send": self.bridge.auto_send(tool_id),
             "has_page": (PAGES_DIR / f"{tool_id}.js").exists(),
+            "has_qrcode": bool(ad.qrcode_path()) if ad else False,
         }
         return view
 
@@ -517,6 +519,106 @@ class Hub:
         r = requests.get(f"{base}/backgrounds/{quote(name)}", timeout=30)
         return r.content, r.headers.get("Content-Type") or "application/octet-stream"
 
+    # ── 二维码取源：优先 WebUI API（按实例端口，带精确过期时间），回落文件 ──
+    def qrcode_fetch_api(self, tool_id: str):
+        """调工具 WebUI 的 /api/login-qrcode。返回 (png_bytes|None, meta|None, error|None)。"""
+        ad = self.adapter(tool_id)
+        src = ad.qrcode_api() if ad is not None else None
+        if not src:
+            return None, None, "未配置 WebUI 二维码源"
+        url, token = str(src.get("url") or "").rstrip("/"), str(src.get("token") or "")
+        if not url:
+            return None, None, "未配置 WebUI 地址"
+        headers = {"x-webui-token": token} if token else {}
+        try:
+            r = requests.get(f"{url}/api/login-qrcode", headers=headers, timeout=8)
+        except Exception as e:
+            return None, None, f"连接 WebUI 失败：{e}"
+        if r.status_code != 200:
+            try:
+                msg = r.json().get("message") or r.text[:80]
+            except Exception:
+                msg = r.text[:80]
+            return None, None, f"HTTP {r.status_code}：{msg}"
+        try:
+            d = r.json()
+        except Exception:
+            return None, None, "返回不是 JSON"
+        if not d.get("success"):
+            return None, None, d.get("message") or "接口返回失败"
+        data = d.get("data") or {}
+        b64 = str(data.get("pngBase64QrcodeData") or "")
+        if not b64:
+            return None, None, "返回中没有二维码数据"
+        try:
+            raw = base64.b64decode(b64.split(",")[-1])
+        except Exception as e:
+            return None, None, f"二维码解码失败：{e}"
+        meta = {
+            "expire_time": data.get("expireTime"),
+            "fetched_at": time.time(),
+            "url": url,
+        }
+        return raw, meta, None
+
+    def qrcode_fetch_file(self, tool_id: str):
+        """读工具的二维码文件。返回 (path|None, stat|None, error|None)。"""
+        ad = self.adapter(tool_id)
+        qp = ad.qrcode_path() if ad is not None else None
+        if qp is None:
+            return None, None, "未找到二维码文件"
+        try:
+            return qp, qp.stat(), None
+        except Exception as e:
+            return None, None, str(e)
+
+    def qrcode_info(self, tool_id: str) -> dict:
+        """汇总两个来源的状态，供前端展示。"""
+        api_ok, api_meta, api_err = self.qrcode_fetch_api(tool_id)
+        fpath, fstat, ferr = self.qrcode_fetch_file(tool_id)
+        out = {
+            "ok": True,
+            "source": "api" if api_ok else ("file" if fstat else "none"),
+            "api": {
+                "available": bool(api_ok),
+                "error": api_err or "",
+                "url": (self.adapter(tool_id).qrcode_api() or {}).get("url", "")
+                       if self.adapter(tool_id) and self.adapter(tool_id).qrcode_api() else "",
+                "expire_in": None,
+                "fetched_str": None,
+            },
+            "file": {
+                "exists": bool(fstat),
+                "path": str(fpath) if fpath else "",
+                "size": fstat.st_size if fstat else 0,
+                "updated_at": fstat.st_mtime if fstat else 0,
+                "updated_str": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(fstat.st_mtime)) if fstat else "",
+                "age_sec": int(time.time() - fstat.st_mtime) if fstat else None,
+                "error": ferr or "",
+            },
+        }
+        if api_meta:
+            exp = api_meta.get("expire_time")
+            out["api"]["fetched_str"] = time.strftime("%Y-%m-%d %H:%M:%S",
+                                                      time.localtime(api_meta.get("fetched_at") or time.time()))
+            if exp:
+                left = float(exp) - time.time() if float(exp) > 10 ** 10 else float(exp)
+                out["api"]["expire_in"] = int(left)
+        return out
+
+    def qrcode_image(self, tool_id: str):
+        """返回 (png_bytes, source)。优先 API，失败回落文件。"""
+        raw, _meta, _err = self.qrcode_fetch_api(tool_id)
+        if raw:
+            return raw, "api"
+        fpath, _stat, _ferr = self.qrcode_fetch_file(tool_id)
+        if fpath is not None:
+            try:
+                return fpath.read_bytes(), "file"
+            except Exception:
+                return None, "error"
+        return None, "none"
+
     # ── 自动上报的「携带信息」模板 ────────────────────────
     def apply_auto_carry(self, tool_id: str, content: str) -> str:
         """按工具配置的 auto_prefix 模板加工自动上报的消息。
@@ -563,6 +665,7 @@ RE_TOOL_API = re.compile(r"^/t/(?P<tool>[A-Za-z0-9_\-]+)(?P<sub>/api/.*)$")
 RE_TOOL_ACTION = re.compile(r"^/api/tools/(?P<tool>[A-Za-z0-9_\-]+)/(?P<action>[a-z\-]+)$")
 RE_PENDING_ACTION = re.compile(r"^/api/pending/(?P<pid>[A-Za-z0-9_\-]+)/(?P<action>approve|delete)$")
 RE_CHAT = re.compile(r"^/api/chat/(?P<tool>[A-Za-z0-9_\-]+)/(?P<action>messages|send|clear)$")
+RE_QR = re.compile(r"^/api/tools/(?P<tool>[A-Za-z0-9_\-]+)/qrcode(?P<sub>/info)?$")
 RE_STATIC = re.compile(r"^/(?P<kind>pages|static)/(?P<name>[A-Za-z0-9_\-]+\.(?:js|css))$")
 
 
@@ -667,6 +770,26 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return self.wfile.write(body)
+
+        # 工具二维码（优先 WebUI API，回落文件）
+        qm = RE_QR.match(path)
+        if qm:
+            tool_id, sub = qm.group("tool"), qm.group("sub")
+            if sub == "/info":
+                return self._json(HUB.qrcode_info(tool_id))
+            body, source = HUB.qrcode_image(tool_id)
+            if not body:
+                return self._json({"ok": False, "message": "未取得二维码（API 不可用且无二维码文件）"}, 404)
+            ctype = "image/png"
+            if body[:2] == b"\xff\xd8":
+                ctype = "image/jpeg"
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Qrcode-Source", source)
             self.end_headers()
             return self.wfile.write(body)
 

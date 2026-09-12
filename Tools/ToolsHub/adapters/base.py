@@ -150,6 +150,24 @@ class ToolAdapter:
         p = self.port()
         return f"http://127.0.0.1:{p}/" if p else ""
 
+    def qrcode_path(self):
+        """返回该工具的二维码图片路径（无则 None）。
+
+        实现后，前端「配置」页会自动出现「扫码登录」区块：
+        显示二维码 + 更新时间 + 是否可能过期，并自动跟随文件刷新。
+        这是【文件兜底】方式；若工具提供了 WebUI API（见 qrcode_api），优先用 API。
+        """
+        return None
+
+    def qrcode_api(self):
+        """返回该工具 WebUI 的二维码 API 信息（无则 None）。
+
+        约定返回：{"url": "http://127.0.0.1:3081", "token": "<webui token>"}
+        Hub 会调用 <url>/api/login-qrcode（header x-webui-token）取二维码，
+        自带精确的过期时间，且按实例端口区分，不会与其他实例互相覆盖。
+        """
+        return None
+
     # ── 桥接钩子（可选覆盖）────────────────────────────────
     def on_held_message(self, payload: dict) -> dict:
         """拦截到的消息进入待审队列前的加工钩子。
