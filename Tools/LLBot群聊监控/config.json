@@ -8,9 +8,19 @@
   "satori_token": "",
   "headless": false,
   "target_qq": "3559594073",
+  "forward_mode": "web",
+  "gateway_url": "http://127.0.0.1:8077/t/llbot_monitor",
+  "web_user_id": "h268",
+  "web_agent_id": "main",
+  "web_keepalive": false,
   "monitored": {
     "851648664": [
-      "2195239690"
+      "2195239690",
+      "2682503133"
+    ],
+    "1055518357": [
+      "994266942",
+      "786358173"
     ]
   }
 }

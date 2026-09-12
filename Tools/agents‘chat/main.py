@@ -20,8 +20,9 @@ from tkinter import scrolledtext, ttk
 import requests
 
 # ===================== 配置 =====================
+# 网关入口：直接用 ingress 的 80 端口（不依赖 kubectl port-forward）
 GATEWAY_HOST = "127.0.0.1"
-GATEWAY_PORT = "8080"
+GATEWAY_PORT = "80"
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chats", "chat_history.json")
 
 USER = "agent_e"
@@ -46,6 +47,10 @@ sess = None
 pending_reply = None
 pending_speaker = None
 history_lock = threading.Lock()
+# 已接受过首条回复的 task_id：同一次请求只保留第一条用户可见回复，
+# 其余（工具轮次的中间/收尾消息）全部丢弃，避免内容被后一条顶掉。
+FIRST_REPLY_TASKS = []
+REPLY_EVENT_TYPES = ("assistant_message", "task_waiting_user")
 
 root = None
 txt_box = None
@@ -202,6 +207,29 @@ def set_status(msg):
 
 
 # ===================== SSE 事件流监听 =====================
+def _accept_reply_event(obj) -> bool:
+    """同一次请求(task)只放行第一条用户可见回复，其余丢弃。
+
+    智能体调用工具时同一 task 会产生多条 assistant_message
+    （第 1 条是完整角色回复，后续是工具收尾），若全部接受会互相顶掉。
+    """
+    if obj.get("type") not in REPLY_EVENT_TYPES:
+        return True
+    meta = obj.get("metadata") or {}
+    if str(meta.get("visible_to_user", "true")).strip().lower() == "false":
+        return False
+    task_id = obj.get("task_id") or ""
+    if not task_id:
+        return True
+    with history_lock:
+        if task_id in FIRST_REPLY_TASKS:
+            return False
+        FIRST_REPLY_TASKS.append(task_id)
+        if len(FIRST_REPLY_TASKS) > 500:
+            del FIRST_REPLY_TASKS[:len(FIRST_REPLY_TASKS) - 500]
+    return True
+
+
 def handle_event(obj):
     global pending_reply, pending_speaker
     etype = obj.get("type", "")
@@ -213,6 +241,9 @@ def handle_event(obj):
         set_status(f"任务失败：{error or text}")
         return
     if not text:
+        return
+    if not _accept_reply_event(obj):
+        print(f"[忽略] 同一 task 的后续消息已丢弃 task={obj.get('task_id')} type={etype}")
         return
 
     # 说话者：scheduler 给 assistant_message 文本加了 "agent_id: " 前缀（无尖括号）；

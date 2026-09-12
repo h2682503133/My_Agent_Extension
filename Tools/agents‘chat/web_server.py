@@ -13,7 +13,7 @@
 调度 LLM 默认用本地 ollama（llama3.1:8b），可配置。
 
 用法：
-  1. 先启动 gateway-backend-service 网关 (127.0.0.1:8080)
+  1. 确保 MSA 网关可访问（默认 http://127.0.0.1:80，即 ingress 入口，无需 port-forward）
   2. python web_server.py
   3. 浏览器/手机访问 http://<本机IP>:8090
 """
@@ -30,13 +30,15 @@ from urllib.parse import urlparse
 import requests
 
 # ===================== 配置 =====================
+# 网关入口：直接用 ingress 的 80 端口（Docker Desktop 已把 LoadBalancer 映射到宿主），
+# 不依赖 kubectl port-forward（转发断掉会导致失联）。
 GATEWAY_HOST = "127.0.0.1"
-GATEWAY_PORT = "8080"
+GATEWAY_PORT = "80"
 WEB_HOST = "0.0.0.0"
 WEB_PORT = 8090
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HISTORY_FILE = os.path.join(BASE_DIR, "chat_history.json")
+HISTORY_FILE = os.path.join(BASE_DIR, "chats","chat_history.json")
 INDEX_FILE = os.path.join(BASE_DIR, "index.html")
 # 群聊状态文件：在线成员/成员特征/离场名单持久化，重启不丢，可手工编辑
 STATE_FILE = os.path.join(BASE_DIR, "chat_state.json")
@@ -116,6 +118,11 @@ FABRICATE_TASKS = {}
 # 编造事件草稿：agent -> {"text","time","sent"}；编造只生成草稿（再次编造覆盖），
 # 该角色重新入场(add_member)时才插入群聊并标记 sent=True
 FABRICATE_DRAFTS = {}
+# 已接受过首条回复的 task_id：同一次请求只保留第一条用户可见回复，
+# 其余（工具轮次的中间/收尾消息）全部丢弃，避免内容被后一条顶掉。
+FIRST_REPLY_TASKS = []
+# 会产生聊天气泡的事件类型
+REPLY_EVENT_TYPES = ("assistant_message", "task_waiting_user")
 
 
 # ===================== 历史记录 =====================
@@ -383,6 +390,34 @@ def _seen_event(event_id: str) -> bool:
         return False
 
 
+def _accept_reply_event(obj) -> bool:
+    """同一次请求(task)只放行第一条用户可见回复，其余丢弃。
+
+    智能体调用工具时，同一 task 会产生多条 assistant_message：
+      第 1 条 = 真正的角色回复（内容完整）
+      第 n 条 = 工具执行后的收尾（常常只有一句确认）
+    若全部接受，pending_reply / 对话记录都会被最后一条顶掉，
+    所以这里按 task_id 只保留首条。
+
+    返回 True = 接受该回复；False = 丢弃。
+    """
+    if obj.get("type") not in REPLY_EVENT_TYPES:
+        return True
+    meta = obj.get("metadata") or {}
+    if str(meta.get("visible_to_user", "true")).strip().lower() == "false":
+        return False                      # 内部事件，不作为回复
+    task_id = obj.get("task_id") or ""
+    if not task_id:
+        return True                       # 无 task_id 无法归组，按老逻辑放行
+    with lock:
+        if task_id in FIRST_REPLY_TASKS:
+            return False
+        FIRST_REPLY_TASKS.append(task_id)
+        if len(FIRST_REPLY_TASKS) > 500:
+            del FIRST_REPLY_TASKS[:len(FIRST_REPLY_TASKS) - 500]
+    return True
+
+
 def handle_event(obj):
     etype = obj.get("type", "")
     text = (obj.get("text") or "").strip()
@@ -405,6 +440,9 @@ def handle_event(obj):
             set_status("编造失败，请检查日志", mode="waiting")
             return
         if etype != "assistant_message" or not text:
+            return
+        if not _accept_reply_event(obj):
+            print(f"[忽略] 编造任务同批后续消息已丢弃 task={task_id}", flush=True)
             return
         text_clean = text
         if text_clean.startswith(fabricate_agent + ":") or text_clean.startswith(fabricate_agent + "："):
@@ -429,6 +467,11 @@ def handle_event(obj):
         return
 
     if not text:
+        return
+
+    # 同一次请求只保留首条用户可见回复，丢弃工具轮次的后续消息
+    if not _accept_reply_event(obj):
+        print(f"[忽略] 同一 task 的后续消息已丢弃 task={obj.get('task_id')} type={etype}", flush=True)
         return
 
     # 说话者：scheduler 给 assistant_message 文本加了 "agent_id: " 前缀（无尖括号），
@@ -1007,7 +1050,7 @@ def main():
     print("群聊版多智能体对话调度器 —— 手机比例 Web 前端")
     print(f"群聊成员：{'、'.join(MEMBERS)}（状态文件：{STATE_FILE}）")
     print(f"调度 LLM：{SCHEDULER_LLM['model']} @ {SCHEDULER_LLM['api_url']}")
-    print("要求：gateway-backend-service 网关已运行于 127.0.0.1:8080")
+    print(f"网关入口：http://{GATEWAY_HOST}:{GATEWAY_PORT}（ingress 80 端口，不依赖 port-forward）")
     print("=" * 50)
     server = ThreadingHTTPServer((WEB_HOST, WEB_PORT), Handler)
     lan = get_lan_ip()

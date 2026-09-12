@@ -20,6 +20,8 @@ import json
 import os
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 import requests
@@ -37,7 +39,12 @@ DEFAULT_CONFIG = {
     "base_satori_port": 5601,  # 账号1 的 Satori 端口
     "satori_token": "",     # Satori 鉴权 token（本地一般为空）
     "headless": False,      # 是否无头模式启动 QQ（多开 QQ 窗口冲突时开启）
-    "target_qq": "",        # 命中消息转发私聊给该 QQ 号
+    "target_qq": "",        # [qq 模式] 命中消息转发私聊给该 QQ 号
+    "forward_mode": "qq",   # 转发渠道：qq = QQ私聊转发（原行为）；web = 走平台网关用 user_id 发给 agent（二选一）
+    "gateway_url": "http://127.0.0.1:8080",  # [web 模式] 平台网关地址（/api/login + /api/messages）
+    "web_user_id": "",      # [web 模式] 登录网关的用户 id
+    "web_agent_id": "main", # [web 模式] 消息发给哪个 agent
+    "web_keepalive": True,  # [web 模式] 是否维持 SSE 事件流订阅（true=能看到 agent 回复，false=纯单向发送）
     "monitored": {},        # 群号 -> [q号, ...]
 }
 
@@ -202,6 +209,120 @@ def send_private_message(acct: dict, bot_info: dict, user_id: str, content: str)
     resp.raise_for_status()
 
 
+# ===================== web 渠道：发给平台 agent =====================
+# 登录会话缓存：gateway_url + user_id -> requests.Session
+_web_sessions = {}
+_web_lock = threading.Lock()
+_sse_thread = None
+_sse_stop = threading.Event()
+_reply_count = 0
+
+
+def _get_web_session(cfg: dict) -> requests.Session:
+    """登录平台网关并返回该 user_id 的会话（登录一次，之后复用）。"""
+    gateway = str(cfg.get("gateway_url", "") or "http://127.0.0.1:8080").rstrip("/")
+    uid = str(cfg.get("web_user_id", "") or "").strip()
+    key = f"{gateway}|{uid}"
+    with _web_lock:
+        sess = _web_sessions.get(key)
+    if sess is not None:
+        return sess
+    sess = requests.Session()
+    resp = sess.post(f"{gateway}/api/login", json={"user_id": uid}, timeout=10)
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {}
+    if resp.status_code != 200 or not data.get("ok"):
+        raise RuntimeError(f"网关登录失败 user={uid}: HTTP {resp.status_code} {data}")
+    print(f"[网关] {uid} 登录成功，session={data.get('session_id')}")
+    with _web_lock:
+        _web_sessions[key] = sess
+    return sess
+
+
+def _sse_worker(cfg: dict):
+    """保持该 user_id 的 SSE 事件流订阅（让群聊监控像网页端一样"在线"）。
+
+    只维持连接并统计 agent 回复，不做任何转发（单向）。
+    """
+    global _reply_count
+    gateway = str(cfg.get("gateway_url", "") or "http://127.0.0.1:8080").rstrip("/")
+    uid = str(cfg.get("web_user_id", "") or "").strip()
+    agent_id = str(cfg.get("web_agent_id", "") or "main").strip()
+    url = f"{gateway}/api/events?user_id={uid}&agent_id={agent_id}"
+    while not _sse_stop.is_set():
+        try:
+            sess = requests.Session()
+            print(f"[网关] 建立事件流订阅：{url}")
+            with sess.get(url, stream=True, timeout=(10, 90)) as resp:
+                if resp.status_code != 200:
+                    raise RuntimeError(f"HTTP {resp.status_code}")
+                print("[网关] 事件流已连接（该 user 在线）")
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if _sse_stop.is_set():
+                        break
+                    if not raw or raw.startswith(":"):
+                        continue
+                    if not raw.startswith("data:"):
+                        continue
+                    _reply_count += 1
+                    try:
+                        obj = json.loads(raw[5:].strip())
+                    except Exception:
+                        continue
+                    text = (obj.get("text") or "").strip()
+                    etype = obj.get("type") or ""
+                    if text and etype in ("assistant_message", "task_waiting_user"):
+                        print(f"[ agent 回复 #{_reply_count}（不转发）] {text[:80]}")
+        except Exception as e:
+            if not _sse_stop.is_set():
+                print(f"[网关] 事件流异常：{e}，5 秒后重连")
+                time.sleep(5)
+
+
+def ensure_web_channel(cfg: dict) -> requests.Session:
+    """确保已登录；若开启 web_keepalive 则同时维持事件流订阅（幂等）。
+
+    注意：发送消息本身不依赖 SSE。开启订阅只是为了：
+      1) agent 的回复不会因平台「无订阅者即丢弃」而看不到；
+      2) 在群聊监控窗口直接确认 agent 是否真的处理了转发消息。
+    配置 web_keepalive=false 可完全关闭订阅（纯单向发送）。
+    """
+    global _sse_thread
+    sess = _get_web_session(cfg)
+    if not cfg.get("web_keepalive", True):
+        return sess
+    with _web_lock:
+        if _sse_thread is None or not _sse_thread.is_alive():
+            _sse_stop.clear()
+            _sse_thread = threading.Thread(target=_sse_worker, args=(cfg,), daemon=True)
+            _sse_thread.start()
+    return sess
+
+
+def send_to_agent_web(cfg: dict, content: str):
+    """把消息以配置的 user_id 通过平台网关发给 agent（单向，不处理回复）。"""
+    gateway = str(cfg.get("gateway_url", "") or "http://127.0.0.1:8080").rstrip("/")
+    uid = str(cfg.get("web_user_id", "") or "").strip()
+    agent_id = str(cfg.get("web_agent_id", "") or "main").strip()
+    if not uid:
+        raise RuntimeError("config.json 未配置 web_user_id")
+    sess = ensure_web_channel(cfg)
+    resp = sess.post(
+        f"{gateway}/api/messages",
+        json={"user_id": uid, "content": content, "agent_id": agent_id},
+        timeout=30,
+    )
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {}
+    if resp.status_code != 200 or not data.get("ok"):
+        raise RuntimeError(f"发送失败: HTTP {resp.status_code} {data}")
+    return data
+
+
 async def handle_event(cfg: dict, acct: dict, bot_info: dict, body: dict):
     if body.get("type") != "message-created":
         return
@@ -239,9 +360,25 @@ async def handle_event(cfg: dict, acct: dict, bot_info: dict, body: dict):
     sender_name = user.get("name") or user.get("nick") or user_id
     print(f"[命中] 群 {group_id} 用户 {sender_name}({user_id})：{text[:80]}")
 
+    # 转发渠道二选一：qq = QQ私聊转发；web = 走平台网关发给 agent
+    mode = str(cfg.get("forward_mode", "") or "qq").strip().lower()
+    if mode == "web":
+        payload = (
+            f"【群聊监控转发 · {name}】\n"
+            f"群号：{group_id}\n"
+            f"发送者：{sender_name} ({user_id})\n"
+            f"内容：{text}"
+        )
+        try:
+            data = await asyncio.to_thread(send_to_agent_web, cfg, payload)
+            print(f"[转发·web] 已以 user={cfg.get('web_user_id')} 发给 agent={cfg.get('web_agent_id')}")
+        except Exception as e:
+            print(f"[转发·web 失败] {e}")
+        return
+
     target = str(cfg.get("target_qq", "") or "").strip()
     if not target:
-        print("[警告] config.json 未配置 target_qq，无法转发")
+        print("[警告] config.json 未配置 target_qq，无法转发（或改用 forward_mode=web）")
         return
 
     forward = (
@@ -251,7 +388,7 @@ async def handle_event(cfg: dict, acct: dict, bot_info: dict, body: dict):
         f"内容：{text}"
     )
     try:
-        send_private_message(acct, bot_info, target, forward)
+        await asyncio.to_thread(send_private_message, acct, bot_info, target, forward)
         print(f"[转发] 已通过 {name} 私聊发送给 {target}")
     except Exception as e:
         print(f"[转发失败] {e}")
@@ -325,8 +462,25 @@ def main():
 
     # 功能2：群聊监控
     print("\n---- 功能2：群聊监控 ----")
-    if not cfg.get("target_qq"):
-        print("[提示] config.json 尚未配置 target_qq，命中消息将无法转发")
+    mode = str(cfg.get("forward_mode", "") or "qq").strip().lower()
+    if mode == "web":
+        print(f"[转发渠道] web：user_id={cfg.get('web_user_id')} -> agent={cfg.get('web_agent_id')} "
+              f"（网关 {cfg.get('gateway_url')}）")
+        if not cfg.get("web_user_id"):
+            print("[提示] config.json 尚未配置 web_user_id，web 转发将失败")
+        if not cfg.get("web_agent_id"):
+            print("[提示] config.json 尚未配置 web_agent_id，将使用默认 main")
+        # 预热：先登录并建立事件流订阅，使该 user 像网页端一样在线
+        if cfg.get("web_user_id"):
+            try:
+                ensure_web_channel(cfg)
+                print("[网关] web 通道就绪（已登录 + 事件流订阅中）")
+            except Exception as e:
+                print(f"[网关] web 通道建立失败：{e}（命中消息时将自动重试）")
+    else:
+        print("[转发渠道] qq：命中消息私聊转发 target_qq")
+        if not cfg.get("target_qq"):
+            print("[提示] config.json 尚未配置 target_qq，命中消息将无法转发")
     if not cfg.get("monitored"):
         print("[提示] config.json 的 monitored 为空，请按 群号 -> [q号] 填写后重启")
 

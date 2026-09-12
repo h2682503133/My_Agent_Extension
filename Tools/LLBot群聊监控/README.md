@@ -20,7 +20,16 @@
 2. **群聊监控**：每个账号分别连接各自的 Satori 网关，仅处理群聊消息。触发条件为"或"：
    监控列表 `monitored`（群号 → [q号, ...]）里的用户 **不 @ 也会处理**；
    非监控用户则需要**明确 @ 机器人**才处理（@全体 不触发）。
-   命中后不把消息发给模型，而是通过**收到消息的那个账号**私聊转发给 `target_qq`。
+   命中后按 `forward_mode` 二选一转发（两种只启用一种）：
+   - `qq`：通过**收到消息的那个账号**私聊转发给 `target_qq`（原行为）；
+   - `web`：以配置的 `web_user_id` 登录平台网关（`gateway_url`），把消息
+     `POST /api/messages` 发给 `web_agent_id` 指定的 agent（单向，不处理回复）。
+
+> **web 模式与 SSE 说明**：发送消息**不依赖** SSE 订阅（`/api/messages` 只调用调度器的
+> create_task）。但网关在「该 user 没有任何 SSE 订阅者」时会**直接丢弃** agent 的回复事件
+> （`sse_hub.publish` 中 `if not queues: return`）。所以要保持 `web_keepalive: true`（默认）
+> 才能像网页端一样维持 `GET /api/events?user_id=...` 订阅、在窗口里看到 agent 回复
+> （仅打印日志，不转发给 QQ）；设为 `false` 则为纯单向发送。
 
 ## 多账号同时运行（LLBot 部分）
 
@@ -48,7 +57,13 @@
 - `base_satori_port`：账号1 的 Satori 端口（默认 `5601`）
 - `satori_token`：Satori 鉴权 token，本地一般留空
 - `headless`：是否无头模式启动 QQ（多开 QQ 窗口冲突时开启）
-- `target_qq`：命中消息转发私聊给的 QQ 号（可不填，留空则只记录不转发）
+- `target_qq`：**[qq 模式]** 命中消息转发私聊给的 QQ 号
+- `forward_mode`：转发渠道，`qq`（QQ私聊）或 `web`（平台网关 user_id → agent），二选一，默认 `qq`
+- `gateway_url`：**[web 模式]** 平台网关地址，默认 `http://127.0.0.1:8080`（需与 agents'chat 相同的网关，/api/login + /api/messages）
+- `web_user_id`：**[web 模式]** 登录网关的用户 id（在网关侧注册过的 user_id）
+- `web_agent_id`：**[web 模式]** 消息发给哪个 agent，默认 `main`
+- `web_keepalive`：**[web 模式]** 是否维持 SSE 事件流订阅，默认 `true`
+  （true = 窗口内能看到 agent 回复、避免回复被网关丢弃；false = 纯单向发送）
 - `monitored`：被监控用户表，格式 `{"群号": ["q号1", "q号2"], ...}`
 
 ## 依赖
