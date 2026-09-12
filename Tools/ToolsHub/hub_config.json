@@ -1,0 +1,29 @@
+{
+  "hub": {
+    "host": "0.0.0.0",
+    "port": 8077,
+    "tools_root": "E:\\github\\My_Agent_Extension\\Tools"
+  },
+  "msa": {
+    "gateway_url": "http://127.0.0.1",
+    "default_user_id": "h268",
+    "default_agent_id": "main",
+    "frontend_url": "http://127.0.0.1"
+  },
+  "tools": {
+    "llbot_monitor": {
+      "auto_send": false,
+      "dir": "E:\\github\\My_Agent_Extension\\Tools\\LLBot群聊监控",
+      "entry": "start.bat",
+      "env_name": "agent",
+      "port": null,
+      "stdin_lines": 2,
+      "args": [],
+      "msa_user_id": "",
+      "msa_agent_id": "",
+      "intercept": true,
+      "enabled": true,
+      "auto_prefix": ""
+    }
+  }
+}

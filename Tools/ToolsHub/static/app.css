@@ -1,0 +1,149 @@
+/* ToolsHub · 配色对齐 My_Agent_MSA 前端（Catppuccin）
+   深色侧栏 + 浅灰内容底 + 幻灯片壁纸（同步 MSA 的 /backgrounds/） */
+:root{
+  --bg:#f5f5f5;            /* 内容底（MSA body 同色，非纯白） */
+  --panel:#fafafa; --panel-solid:#ffffff; --panel2:#f0f0f0;
+  --line:#d0d0d0; --line2:#e4e4e4;
+  --fg:#222222; --dim:#6c7086;
+  --accent:#89b4fa; --accent-ink:#1e1e2e; --accent-soft:#e8f0fe;
+  /* 侧栏（MSA sidebar 同色） */
+  --nav-bg:#1e1e2e; --nav-fg:#cdd6f4; --nav-dim:#a6adc8;
+  --nav-line:#313244; --nav-hover:#313244; --nav-active:#45475a;
+  --ok:#40a02b; --warn:#df8e1d; --err:#d20f39; --hold:#8839ef;
+  --shadow:0 1px 2px rgba(30,30,46,.06),0 6px 16px rgba(30,30,46,.05);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;font:14px/1.55 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+     background:var(--bg);color:var(--fg);overflow:hidden}
+/* 幻灯片壁纸：与 MSA chat.html 同机制（cover + 低不透明度 + 5 分钟轮换） */
+#bg-rotator{position:fixed;inset:0;z-index:0;background-size:cover;background-position:center;
+            background-repeat:no-repeat;opacity:.30;pointer-events:none;transition:background-image .8s}
+#app{display:flex;height:100vh;position:relative;z-index:1}
+
+/* 侧栏（深色，对齐 MSA） */
+#side{width:236px;flex:0 0 236px;background:var(--nav-bg);color:var(--nav-fg);
+      border-right:1px solid var(--nav-line);display:flex;flex-direction:column;min-height:0}
+#brand{padding:16px 18px 6px;font-size:16px;font-weight:700;display:flex;flex-direction:column}
+#brand span{font-size:11px;color:var(--nav-dim);font-weight:400;letter-spacing:.06em}
+#msa{display:flex;align-items:center;gap:7px;padding:0 18px 12px;font-size:12px;color:var(--nav-dim)}
+.dot{width:8px;height:8px;border-radius:50%;background:#6c7086;flex:0 0 8px}
+.dot.ok{background:#a6e3a1} .dot.err{background:#f38ba8} .dot.warn{background:#f9e2af}
+#navlist{overflow:auto;flex:1;min-height:0;padding-bottom:10px}
+.navgroup{padding:12px 18px 4px;font-size:11px;letter-spacing:.08em;color:#7f849c}
+.nav{display:flex;align-items:center;gap:8px;padding:9px 16px;cursor:pointer;
+     border-left:3px solid transparent;color:var(--nav-fg)}
+.nav:hover{background:var(--nav-hover)}
+.nav.active{background:var(--nav-active);border-left-color:var(--accent);color:#fff;font-weight:600}
+.nav .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav .badge{background:var(--hold);color:#fff;border-radius:9px;padding:0 7px;font-size:11px;font-weight:700}
+#sidefoot{padding:10px 14px;border-top:1px solid var(--nav-line);display:flex;gap:8px}
+#sidefoot button{background:#45475a;border-color:#45475a;color:var(--nav-fg)}
+#sidefoot button:hover{background:#585b70;border-color:#585b70;color:#fff}
+
+/* 主区（半透明，让壁纸透出） */
+#main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+#topbar{display:flex;align-items:center;gap:10px;padding:11px 18px;border-bottom:1px solid var(--line);
+        background:rgba(250,250,250,.86);backdrop-filter:blur(6px)}
+#topbar h1{font-size:15px;margin:0;font-weight:600}
+#topbar .spacer{flex:1}
+#content{flex:1;overflow:auto;padding:18px;min-height:0;display:flex;flex-direction:column}
+#content.flush{padding:0}
+
+/* 控件 */
+button{font:inherit;color:var(--fg);background:rgba(255,255,255,.92);border:1px solid var(--line);
+       border-radius:7px;padding:6px 12px;cursor:pointer;transition:.12s}
+button:hover{border-color:var(--accent);background:var(--accent-soft)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+button.primary:hover{background:#74a4f7;border-color:#74a4f7;color:var(--accent-ink)}
+button.ok{background:var(--ok);border-color:var(--ok);color:#fff;font-weight:600}
+button.ok:hover{background:#3a8f27;border-color:#3a8f27}
+button.danger{border-color:#eebfcb;color:var(--err)}
+button.danger:hover{background:#fdf0f3;border-color:var(--err)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.sm{padding:3px 10px;font-size:12px}
+input[type=text],input[type=number],textarea,select{
+  width:100%;background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:7px;color:var(--fg);
+  padding:7px 10px;font:inherit}
+textarea{resize:vertical;min-height:70px}
+input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+label.f{display:block;margin:10px 0 3px;font-size:12px;color:var(--dim)}
+
+/* 通用卡片 */
+.card{background:rgba(250,250,250,.9);border:1px solid var(--line);border-radius:10px;padding:14px 16px;
+      margin-bottom:14px;box-shadow:var(--shadow);backdrop-filter:blur(4px)}
+.card h2{margin:0 0 10px;font-size:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.kv{display:flex;gap:8px;font-size:13px;padding:3px 0}
+.kv .k{color:var(--dim);min-width:96px}
+.muted{color:var(--dim)} .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tag{font-size:11px;padding:1px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim);
+     background:rgba(255,255,255,.72)}
+.tag.on{color:#2f7d1f;border-color:#c6e6bb;background:#f2fbef}
+.tag.hold{color:var(--hold);border-color:#e0d0f7;background:#f8f5ff}
+pre.log{background:rgba(255,255,255,.95);border:1px solid var(--line);border-radius:8px;padding:10px;
+        max-height:320px;overflow:auto;font:12px/1.5 Consolas,monospace;white-space:pre-wrap;margin:0}
+iframe.tool{width:100%;flex:1;min-height:420px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.toast{position:fixed;right:18px;bottom:18px;background:#fff;border:1px solid var(--line);
+       border-left:3px solid var(--accent);border-radius:8px;padding:10px 14px;max-width:420px;
+       z-index:99;box-shadow:var(--shadow)}
+.toast.err{border-left-color:var(--err)} .toast.ok{border-left-color:var(--ok)}
+#burger{display:none}
+
+/* 工具子标签：低不透明度，让壁纸透出来 */
+.tabs{display:flex;gap:4px;padding:0 18px;background:rgba(250,250,250,.35);border-bottom:1px solid var(--line);
+      backdrop-filter:blur(10px)}
+.tab{padding:8px 14px;cursor:pointer;font-size:13px;color:#4a4f5c;border-bottom:2px solid transparent}
+.tab:hover{color:#1e1e2e}
+.tab.active{color:#1e1e2e;border-bottom-color:var(--accent);font-weight:600}
+
+/* ── 聊天页（工具专属页面用）── */
+/* 去掉整页蒙版：壁纸直接透出 */
+.chatwrap{display:flex;flex-direction:column;height:100%;min-height:0;background:transparent}
+.chatbar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);
+         background:rgba(250,250,250,.45);backdrop-filter:blur(10px);flex-wrap:wrap}
+.chatbar .name{font-weight:600}
+.autoswitch{display:flex;align-items:center;gap:8px;font-size:13px}
+.switch{position:relative;width:40px;height:22px;border-radius:999px;background:#cfd6e0;cursor:pointer;transition:.15s}
+.switch.on{background:var(--ok)}
+.switch i{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:.15s}
+.switch.on i{left:20px}
+.chatlog{flex:1;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:10px;
+         background:transparent}
+/* 自动上报「携带信息」设置条 */
+.carrybar{padding:10px 16px;border-bottom:1px solid var(--line);background:rgba(232,240,254,.5);
+          backdrop-filter:blur(8px)}
+.carrybar textarea{min-height:60px;margin-top:6px;font-family:Consolas,monospace;font-size:12.5px}
+.carrybar code{background:rgba(255,255,255,.85);border:1px solid var(--line);border-radius:4px;padding:0 4px;font-size:11.5px}
+/* 注意：pre-wrap 只作用于正文，避免模板缩进被当成内容渲染出大片空白 */
+/* 气泡不用 backdrop-filter（记录多时逐条模糊很吃性能），靠半透明底色即可 */
+.bubble{max-width:min(78%,720px);border-radius:12px;padding:8px 12px;box-shadow:var(--shadow);
+        white-space:normal;word-break:break-word;line-height:1.6}
+.bubble .who{font-size:11px;color:var(--dim);margin:0 0 3px;line-height:1.25;
+             display:flex;gap:6px;align-items:baseline;flex-wrap:wrap}
+.bubble .txt{white-space:pre-wrap}
+.bubble .acts{display:flex;gap:8px;margin-top:8px}
+.b-in{background:rgba(255,255,255,.58);border:1px solid rgba(208,208,208,.65);align-self:flex-start}
+.b-out{background:rgba(137,180,250,.28);border:1px solid rgba(137,180,250,.45);align-self:flex-end}
+.b-agent{background:rgba(255,255,255,.58);border:1px solid rgba(208,208,208,.65);align-self:flex-start;
+         border-left:3px solid var(--accent)}
+.b-sys{align-self:center;background:rgba(240,240,240,.55);color:var(--dim);font-size:12px;padding:3px 12px;
+       border-radius:999px;backdrop-filter:blur(6px)}
+.b-pending{background:rgba(255,255,255,.6);border:1px solid rgba(208,208,208,.7);border-left:3px solid var(--hold);
+           align-self:flex-start;width:min(100%,760px);backdrop-filter:blur(8px)}
+.b-pending.done{opacity:.62}
+.b-pending .hd{font-size:12px;color:var(--dim);margin:0 0 6px;line-height:1.3;
+               display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+.b-pending input,.b-pending textarea{background:rgba(255,255,255,.9)}
+.chatinput{border-top:1px solid var(--line);padding:10px 16px;display:flex;gap:10px;align-items:flex-end;
+           background:rgba(255,255,255,.5);backdrop-filter:blur(10px)}
+.chatinput textarea{min-height:44px;max-height:140px;resize:none;background:rgba(255,255,255,.92)}
+.empty{color:var(--dim);text-align:center;margin:auto;font-size:13px}
+
+@media (max-width:820px){
+  #side{position:fixed;z-index:60;height:100vh;left:-250px;transition:left .18s;box-shadow:var(--shadow)}
+  #side.open{left:0}
+  #burger{display:inline-block}
+  #content{padding:12px}
+  .bubble{max-width:92%}
+}

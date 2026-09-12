@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ToolsHub · 工具聚合</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div id="bg-rotator"></div>
+<div id="app">
+  <aside id="side">
+    <div id="brand">ToolsHub<span>工具聚合</span></div>
+    <div id="msa"><span class="dot" id="msadot"></span><span id="msatext">检测中…</span></div>
+    <div id="navlist"></div>
+    <div id="sidefoot">
+      <button class="sm" onclick="reloadAdapters()">重扫适配器</button>
+      <button class="sm" onclick="loadState()">刷新</button>
+    </div>
+  </aside>
+
+  <main id="main">
+    <div id="topbar">
+      <button id="burger" class="sm" onclick="document.getElementById('side').classList.toggle('open')">菜单</button>
+      <h1 id="title">概览</h1>
+      <div class="spacer"></div>
+      <span class="muted" id="hubinfo"></span>
+    </div>
+    <div id="content"></div>
+  </main>
+</div>
+<div id="toasts"></div>
+<script src="/static/bg.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>
